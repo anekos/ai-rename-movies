@@ -18,7 +18,7 @@ def main() -> None:
     """rename-movies の CLI エントリーポイント。"""
 
 
-@main.command(name="suggest-name")
+@main.command(name="rename")
 @click.argument(
     "video",
     type=click.Path(path_type=Path, exists=True, dir_okay=False, readable=True),
@@ -29,11 +29,11 @@ def main() -> None:
     show_default=True,
     help="OpenAI API で使用するモデル名。",
 )
-def suggest_name(
+def rename(  # noqa: D401  # Click コマンド名と同じ
     video: Path,
     model: str,
 ) -> None:
-    """動画から1フレーム目を抽出し、AIにふさわしいファイル名を提案させます。"""
+    """動画から1フレーム目を抽出し、AIにふさわしいファイル名を提案してリネームします。"""
 
     click.echo(f"動画: {video}")
     with tempfile.TemporaryDirectory(prefix=f"rename-movies-{video.stem}-") as tmpdir:
@@ -47,6 +47,20 @@ def suggest_name(
 
     click.echo("推奨ファイル名:")
     click.echo(suggestion)
+
+    target_path = video.with_name(suggestion)
+    if target_path.exists():
+        raise click.ClickException(
+            f"{target_path} は既に存在します。上書きできません。"
+        )
+
+    if click.confirm(
+        f"{video.name} を {suggestion} にリネームしますか？", default=True
+    ):
+        video.rename(target_path)
+        click.echo(f"リネーム完了: {target_path}")
+    else:
+        click.echo("リネームをキャンセルしました。")
 
 
 def extract_first_frame(video_path: Path, output_path: Path) -> Path:
@@ -109,7 +123,7 @@ def request_video_filename(*, model: str, video_path: Path, image_path: Path) ->
         f"- 元動画ファイル名: {video_path.name}\n"
         f"- 抽出した画像ファイル名: {image_path.name}\n"
         "命名ルール:\n"
-        f"1. 英小文字と数字、ハイフンのみを使用し、末尾に {video_ext} を付けること。\n"
+        f"1. 各単語の先頭文字は大文字、残りは小文字で記述し、単語と単語の間には必ず半角スペースを入れ、最後に {video_ext} を付けること。\n"
         "2. 4語以内に収めること。\n"
         "3. シーンや登場人物など、画像や元名から推測できる要素を盛り込むこと。\n"
         "4. 出力は1行のみ。余計な説明は不要。\n"
