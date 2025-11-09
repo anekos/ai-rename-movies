@@ -46,12 +46,19 @@ def rename(videos: tuple[Path, ...], model: str) -> None:
         click.echo("推奨ファイル名:")
         click.echo(suggestion)
 
-        if target_path.exists():
-            raise click.ClickException(f"{target_path} は既に存在します。")
-        if target_path in planned_targets:
-            raise click.ClickException(
-                f"提案結果が重複しました: {target_path.name}。プロンプト条件を調整してください。"
-            )
+        collision_with_existing = target_path.exists()
+        collision_with_planned = target_path in planned_targets
+        if collision_with_existing or collision_with_planned:
+            resolved_path = _generate_unique_target(target_path, planned_targets)
+            if collision_with_existing:
+                click.echo(
+                    f"{target_path} は既に存在するため {resolved_path.name} を使用します。"
+                )
+            else:
+                click.echo(
+                    f"提案結果が重複したため {resolved_path.name} に番号を付けて回避します。"
+                )
+            target_path = resolved_path
 
         plans.append((video, target_path, suggestion))
         planned_targets.add(target_path)
@@ -182,6 +189,27 @@ def request_video_filename(*, model: str, video_path: Path, image_path: Path) ->
             "OpenAI API からテキスト応答が取得できませんでした。"
         )
     return message.strip()
+
+
+def _generate_unique_target(target_path: Path, planned_targets: set[Path]) -> Path:
+    """Append incremental suffixes until no on-disk or in-batch collision remains."""
+
+    if not target_path.exists() and target_path not in planned_targets:
+        return target_path
+
+    counter = 1
+    while True:
+        candidate = _append_numeric_suffix(target_path, counter)
+        if not candidate.exists() and candidate not in planned_targets:
+            return candidate
+        counter += 1
+
+
+def _append_numeric_suffix(target_path: Path, counter: int) -> Path:
+    suffix = "".join(target_path.suffixes)
+    base = target_path.name[: -len(suffix)] if suffix else target_path.name
+    new_name = f"{base}-{counter}{suffix}"
+    return target_path.with_name(new_name)
 
 
 def _extract_output_text(response: Any) -> str:
