@@ -20,8 +20,9 @@ def main() -> None:
 
 @main.command(name="rename")
 @click.argument(
-    "video",
+    "videos",
     type=click.Path(path_type=Path, exists=True, dir_okay=False, readable=True),
+    nargs=-1,
 )
 @click.option(
     "--model",
@@ -29,12 +30,46 @@ def main() -> None:
     show_default=True,
     help="OpenAI API で使用するモデル名。",
 )
-def rename(  # noqa: D401  # Click コマンド名と同じ
-    video: Path,
-    model: str,
-) -> None:
-    """動画から1フレーム目を抽出し、AIにふさわしいファイル名を提案してリネームします。"""
+def rename(videos: tuple[Path, ...], model: str) -> None:
+    """複数動画のファイル名候補を提案し、一括でリネームします。"""
 
+    if not videos:
+        raise click.ClickException("動画ファイルを1つ以上指定してください。")
+
+    plans: list[tuple[Path, Path, str]] = []
+    planned_targets: set[Path] = set()
+
+    for video in videos:
+        suggestion = generate_suggestion(video=video, model=model)
+        target_path = video.with_name(suggestion)
+
+        click.echo("推奨ファイル名:")
+        click.echo(suggestion)
+
+        if target_path.exists():
+            raise click.ClickException(f"{target_path} は既に存在します。")
+        if target_path in planned_targets:
+            raise click.ClickException(
+                f"提案結果が重複しました: {target_path.name}。プロンプト条件を調整してください。"
+            )
+
+        plans.append((video, target_path, suggestion))
+        planned_targets.add(target_path)
+        click.echo("-" * 40)
+
+    click.echo("リネームプレビュー:")
+    for source, target, _ in plans:
+        click.echo(f"{source.name} -> {target.name}")
+
+    if click.confirm("上記のリネームをまとめて適用しますか？", default=True):
+        for source, target, _ in plans:
+            source.rename(target)
+            click.echo(f"リネーム完了: {target}")
+    else:
+        click.echo("リネームをキャンセルしました。")
+
+
+def generate_suggestion(*, video: Path, model: str) -> str:
     click.echo(f"動画: {video}")
     with tempfile.TemporaryDirectory(prefix=f"rename-movies-{video.stem}-") as tmpdir:
         frame_file = Path(tmpdir) / f"{video.stem}_frame0.jpg"
@@ -44,23 +79,7 @@ def rename(  # noqa: D401  # Click コマンド名と同じ
         suggestion = request_video_filename(
             model=model, video_path=video, image_path=frame_file
         )
-
-    click.echo("推奨ファイル名:")
-    click.echo(suggestion)
-
-    target_path = video.with_name(suggestion)
-    if target_path.exists():
-        raise click.ClickException(
-            f"{target_path} は既に存在します。上書きできません。"
-        )
-
-    if click.confirm(
-        f"{video.name} を {suggestion} にリネームしますか？", default=True
-    ):
-        video.rename(target_path)
-        click.echo(f"リネーム完了: {target_path}")
-    else:
-        click.echo("リネームをキャンセルしました。")
+    return suggestion
 
 
 def extract_first_frame(video_path: Path, output_path: Path) -> Path:
